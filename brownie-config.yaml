@@ -1,0 +1,29 @@
+dependencies:
+  - OpenZeppelin/openzeppelin-contracts@4.4.1
+  - OpenZeppelin/openzeppelin-contracts@4.6.0
+  - smartcontractkit/chainlink@1.4.1
+compiler:
+  solc:
+    remappings:
+      - "@openzeppelin=OpenZeppelin/openzeppelin-contracts@4.4.1"
+      - "@openzeppelin=OpenZeppelin/openzeppelin-contracts@4.6.0"
+      - "@chainlink=smartcontractkit/chainlink@1.4.1"
+
+dotenv: .env
+
+networks:
+  development:
+    verify: False
+  goerli:
+    link_token: "0x326C977E6efc84E512bB9C30f76E30c160eD06FB"
+    dai_token: "0xE68104D83e647b7c1C15a91a8D8aAD21a51B3B3E"
+    eth_token: "0x87E740C1970fFc199119e62F402a2fBe47aF54db"
+    link_usd_price_feed: "0x48731cF7e84dc94C5f84577882c14Be11a5B7456"
+    dai_usd_price_feed: "0x0d79df66BE487753B02D015Fb622DED7f0E9798d"
+    eth_usd_price_feed: "0xD4a33860578De61DBAbDc8BFdb98FD742fA7028e"
+    verify: False
+    set_the_gas_limit_manually: True
+    gas_limit: 150344
+wallets:
+  from_key: ${PRIVATE_KEY}
+  from_key_non_owner: ${PRIVATE_KEY_NON_OWNER}
