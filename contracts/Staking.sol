@@ -14,15 +14,15 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
 contract Staking is Ownable, ReentrancyGuard {
-    mapping(address => bool) public tokenIsApproved;
-    mapping(address => uint8) public tokensToRate;
-    mapping(address => address) public tokensToPriceFeed;
-    mapping(address => mapping(address => uint256)) public tokenToUserBalance;
+    mapping(address => bool) public s_tokenIsApproved;
+    mapping(address => uint8) public s_tokensToRate;
+    mapping(address => address) public s_tokensToPriceFeed;
+    mapping(address => mapping(address => uint256)) public s_tokenToUserBalance;
+    mapping(address => mapping(address => uint256)) public s_tokenToUserReward;
     mapping(address => mapping(uint256 => uint256))
-        public tokenAmountToStakingTime;
-    mapping(address => mapping(address => uint256)) public tokenToUserReward;
-    uint256 public unstakeTime;
-    IERC20 public rewardToken;
+        public s_tokenAmountToStakingTime;
+    uint256 public immutable unstakeTime;
+    IERC20 public immutable rewardToken;
     event Staked(
         address indexed investor,
         address indexed token,
@@ -53,15 +53,15 @@ contract Staking is Ownable, ReentrancyGuard {
         uint8 _rate,
         address _priceFeed
     ) public onlyOwner {
-        tokensToRate[_token] = _rate;
-        tokensToPriceFeed[_token] = _priceFeed;
-        tokenIsApproved[_token] = true;
+        s_tokensToRate[_token] = _rate;
+        s_tokensToPriceFeed[_token] = _priceFeed;
+        s_tokenIsApproved[_token] = true;
     }
 
     /// @param _token  Token address that should be disapproved for staking.
     /// @dev Once a token's disapproved, people won't be able to stake them.
     function changeTokenApproval(address _token) public onlyOwner {
-        tokenIsApproved[_token] = !tokenIsApproved[_token];
+        s_tokenIsApproved[_token] = !s_tokenIsApproved[_token];
     }
 
     /// @param _token An approved token address is to be staked.
@@ -69,10 +69,10 @@ contract Staking is Ownable, ReentrancyGuard {
     /// @notice The token address should be approved and be staked in a unique and not duplicated amount, so if a specific amount of a token was staked before by a user, another amount of it should be staked now.
     /// @dev Once a token's added to the contract within this function user can stake them.
     function stakeToken(address _token, uint256 _amount) external nonReentrant {
-        require(tokenIsApproved[_token] == true, "Token isn't allowed");
+        require(s_tokenIsApproved[_token] == true, "Token isn't allowed");
         require(_amount > 0, "You should send at least some token!");
         require(
-            tokenAmountToStakingTime[msg.sender][_amount] == 0,
+            s_tokenAmountToStakingTime[msg.sender][_amount] == 0,
             "You have already staked this amount!"
         );
         IERC20(_token).transferFrom(msg.sender, address(this), _amount);
@@ -92,9 +92,9 @@ contract Staking is Ownable, ReentrancyGuard {
         uint256 _amount,
         uint256 _stakingTime
     ) private {
-        uint256 _currentBalance = tokenToUserBalance[_token][_user];
-        tokenAmountToStakingTime[_user][_amount] = _stakingTime;
-        tokenToUserBalance[_token][_user] = _currentBalance + _amount;
+        uint256 _currentBalance = s_tokenToUserBalance[_token][_user];
+        s_tokenAmountToStakingTime[_user][_amount] = _stakingTime;
+        s_tokenToUserBalance[_token][_user] = _currentBalance + _amount;
     }
 
     /// @param _token Token address entered by a user for checking its total balance value in USD.
@@ -102,12 +102,9 @@ contract Staking is Ownable, ReentrancyGuard {
     /// @notice This function returns the current token's total balance value in USD that the user staked. It gets this value off-chain using Chainlink oracles.
     /// @dev Current price and token decimals are got off-chain with Chainlink AggregatorV3Interface. Price feed addresses should be checked during time within Chainlink contract addresses for not being disabled. The owner can edit the new price feed address by calling setTokensData().
     function getUserBalanceValue(address _token) public view returns (uint256) {
-        require(
-            tokenToUserBalance[_token][msg.sender] > 0,
-            "There's no fund in your account!"
-        );
+        uint256 _balance = s_tokenToUserBalance[_token][msg.sender];
+        require(_balance > 0, "There's no fund in your account!");
         (uint256 _price, uint256 _decimals) = getValue(_token);
-        uint256 _balance = tokenToUserBalance[_token][msg.sender];
         return (_balance * _price) / (10**_decimals);
     }
 
@@ -116,7 +113,7 @@ contract Staking is Ownable, ReentrancyGuard {
     /// @return uint256 token's decimals gets from Chainlink AggregatorV3Interface.
     /// @dev Price feed addresses should be checked during time within Chainlink contract addresses for not being disabled. The owner can edit the new price feed address by calling setTokenData().
     function getValue(address _token) private view returns (uint256, uint256) {
-        address priceFeedAddress = tokensToPriceFeed[_token];
+        address priceFeedAddress = s_tokensToPriceFeed[_token];
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
             priceFeedAddress
         );
@@ -133,34 +130,30 @@ contract Staking is Ownable, ReentrancyGuard {
         external
         nonReentrant
     {
-        require(tokenToUserBalance[_token][msg.sender] >= _amount);
-        uint256 _stakingTime = tokenAmountToStakingTime[msg.sender][_amount];
+        require(s_tokenToUserBalance[_token][msg.sender] >= _amount);
+        uint256 _stakingTime = s_tokenAmountToStakingTime[msg.sender][_amount];
         require(block.timestamp >= _stakingTime + (unstakeTime * 1 days));
-        tokenToUserBalance[_token][msg.sender] - _amount;
+        s_tokenToUserBalance[_token][msg.sender] - _amount;
         IERC20(_token).transfer(msg.sender, _amount);
         rewardCalculator(_token, _amount);
-        delete tokenAmountToStakingTime[msg.sender][_amount];
+        delete s_tokenAmountToStakingTime[msg.sender][_amount];
         emit Unstaked(msg.sender, _token, _amount);
     }
 
     /// @dev This private function, called within unstakeToken(), calculates the user reward by multiplying the token staked amount by the token's rate and adds it to the rewards that the user hasn't claimed yet.
     function rewardCalculator(address _token, uint256 _amount) private {
-        uint256 preReward = tokenToUserReward[_token][msg.sender];
-        uint256 _reward = tokensToRate[_token] * _amount;
-        tokenToUserReward[_token][msg.sender] = preReward + _reward;
+        uint256 preReward = s_tokenToUserReward[_token][msg.sender];
+        uint256 _reward = s_tokensToRate[_token] * _amount;
+        s_tokenToUserReward[_token][msg.sender] = preReward + _reward;
     }
 
     /// @param _token Token address staked and unstaked by the user before.
     /// @notice This function transfers all the reward tokens that had been rewarded to the user for staking some _token.
     function claimRewards(address _token) external nonReentrant {
-        require(
-            tokenToUserReward[_token][msg.sender] != 0,
-            "You should stake some token to get rewarded"
-        );
-        uint256 _reward = tokenToUserReward[_token][msg.sender];
-
+        uint256 _reward = s_tokenToUserReward[_token][msg.sender];
+        require(_reward != 0, "You should stake some token to get rewarded");
         rewardToken.transfer(msg.sender, _reward);
-        delete tokenToUserReward[_token][msg.sender];
+        delete s_tokenToUserReward[_token][msg.sender];
         emit Claimed(msg.sender, _token, _reward);
     }
 }
